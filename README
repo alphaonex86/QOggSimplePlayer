@@ -1,0 +1,6 @@
+=======================================================
+Description ===========================================
+=======================================================
+
+This project is simple player to play ogg file into Qt application without install codec thanks to use libvorbis.
+For the open source game: http://catchchallenger.first-world.info/
