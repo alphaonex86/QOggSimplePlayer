@@ -20,7 +20,9 @@ private slots:
     void on_pushButton_clicked();
 private:
     Ui::MainWindow *ui;
-    QOggSimplePlayer oggSimplePlayer;
+    QOggSimplePlayer *oggSimplePlayer;
+    QOggSimplePlayer *oggSimplePlayer2;
+    QThread * thread;
 };
 
 #endif // MAINWINDOW_H

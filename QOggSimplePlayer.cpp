@@ -5,13 +5,33 @@
 #define MAX_BUFFER_SIZE 64*1024
 #define MIN_BUFFER_SIZE 16*1024
 
-QOggSimplePlayer::QOggSimplePlayer(const QString &filePath,QObject *parent) :
-    QObject(parent)
+QOggSimplePlayer::QOggSimplePlayer(const QString &filePath, QThread *audioThread)
 {
+    if(audioThread!=NULL)
+        moveToThread(audioThread);
+    needPlay=false;
     output=NULL;
+    file=NULL;
     buffer.open(QIODevice::ReadWrite|QIODevice::Unbuffered);
+    this->filePath=filePath;
+
+    connect(&buffer,SIGNAL(readDone()),SLOT(readDone()));
+    connect(this,SIGNAL(internalOpen()),SLOT(open()),Qt::QueuedConnection);
+    if(audioThread!=NULL)
+        connect(this,SIGNAL(internalClose()),SLOT(close()),Qt::BlockingQueuedConnection);
+    else
+        connect(this,SIGNAL(internalClose()),SLOT(close()),Qt::DirectConnection);
+    emit internalOpen();
+}
+
+QOggSimplePlayer::~QOggSimplePlayer()
+{
+    emit internalClose();
+}
+
+void QOggSimplePlayer::open()
+{
     QAudioFormat format;
-    // Set up the format, eg.
     format.setFrequency(48000);
     format.setChannels(1);
     format.setSampleSize(16);
@@ -19,6 +39,11 @@ QOggSimplePlayer::QOggSimplePlayer(const QString &filePath,QObject *parent) :
     format.setByteOrder(QAudioFormat::LittleEndian);
     format.setSampleType(QAudioFormat::SignedInt);
 
+    if(file!=NULL)
+    {
+        fclose(file);
+        delete file;
+    }
     file=fopen(filePath.toLocal8Bit().data(),"r");
     if(file==NULL)
     {
@@ -40,11 +65,12 @@ QOggSimplePlayer::QOggSimplePlayer(const QString &filePath,QObject *parent) :
             ++ptr;
         }
         qDebug() << QString("Bitstream is %1 channel, %2Hz").arg(vi->channels).arg(vi->rate);
+        qDebug() << QString("Encoded by: %1").arg(ov_comment(&vf,-1)->vendor);
         format.setChannels(vi->channels);
         format.setFrequency(vi->rate);
         format.setSampleRate(vi->rate);
-        qDebug() << QString("Encoded by: %1").arg(ov_comment(&vf,-1)->vendor);
     }
+
     QAudioDeviceInfo info(QAudioDeviceInfo::defaultOutputDevice());
     if (!info.isFormatSupported(format)) {
         qDebug() << "raw audio format not supported by backend, cannot play audio.";
@@ -55,41 +81,28 @@ QOggSimplePlayer::QOggSimplePlayer(const QString &filePath,QObject *parent) :
         delete output;
     output = new QAudioOutput(format);
     output->setBufferSize(4096);
-
-    connect(&buffer,SIGNAL(readDone()),SLOT(readDone()));
     connect(output,SIGNAL(stateChanged(QAudio::State)),SLOT(finishedPlaying(QAudio::State)),Qt::QueuedConnection);
+
+    if(needPlay)
+        start();
 }
 
-QOggSimplePlayer::~QOggSimplePlayer()
+void QOggSimplePlayer::close()
 {
-    buffer.close();
-    ov_clear(&vf);
-}
-
-void QOggSimplePlayer::readMore()
-{
-    char pcmout[4096];
-    bool eof=false;
-
-    buffer.seek(buffer.data().size());
-    while(!eof && buffer.data().size()<MAX_BUFFER_SIZE){
-        long ret=ov_read(&vf,pcmout,sizeof(pcmout),0,2,1,&current_section);
-        if (ret == 0) {
-            /* EOF */
-            eof=true;
-        } else if (ret < 0) {
-            /* error in the stream.  Not a problem, just reporting it in
-            case we (the app) cares.  In this case, we don't. */
-        } else {
-            /* we don't bother dealing with sample rate changes, etc, but
-            you'll have to */
-            QByteArray tempData(pcmout,ret);
-            //int pos=buffer.pos();
-            buffer.write(tempData);
-            //buffer.seek(pos);
-        }
+    if(output!=NULL)
+    {
+        output->stop();
+        delete output;
+        output=NULL;
     }
-    buffer.seek(0);
+    buffer.close();
+    /*do by ov_clear
+    if(file!=NULL)
+    {
+        fclose(file);
+        file=NULL;
+    }*/
+    ov_clear(&vf);
 }
 
 void QOggSimplePlayer::finishedPlaying(QAudio::State state)
@@ -100,14 +113,20 @@ void QOggSimplePlayer::finishedPlaying(QAudio::State state)
 
 void QOggSimplePlayer::start()
 {
+    needPlay=true;
+    if(output==NULL)
+        return;
     stop();
-    readMore();
+    readDone();
     output->start(&buffer);
 }
 
 void QOggSimplePlayer::stop()
 {
-    output->stop();
+    needPlay=false;
+    if(output==NULL)
+        return;
+    output->reset();
     buffer.seek(0);
     buffer.close();
     buffer.setData(QByteArray());
@@ -119,6 +138,30 @@ void QOggSimplePlayer::stop()
 
 void QOggSimplePlayer::readDone()
 {
+    if(output==NULL)
+        return;
     if(buffer.data().size()<MIN_BUFFER_SIZE)
-        readMore();
+    {
+        char pcmout[4096];
+        bool eof=false;
+        buffer.seek(buffer.data().size());
+        while(!eof && buffer.data().size()<MAX_BUFFER_SIZE){
+            long ret=ov_read(&vf,pcmout,sizeof(pcmout),0,2,1,&current_section);
+            if (ret == 0) {
+                /* EOF */
+                eof=true;
+            } else if (ret < 0) {
+                /* error in the stream.  Not a problem, just reporting it in
+                case we (the app) cares.  In this case, we don't. */
+            } else {
+                /* we don't bother dealing with sample rate changes, etc, but
+                you'll have to */
+                QByteArray tempData(pcmout,ret);
+                //int pos=buffer.pos();
+                buffer.write(tempData);
+                //buffer.seek(pos);
+            }
+        }
+        buffer.seek(0);
+    }
 }

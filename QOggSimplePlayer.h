@@ -23,20 +23,27 @@ class QOggSimplePlayer : public QObject
 {
     Q_OBJECT
 public:
-    explicit QOggSimplePlayer(const QString &filePath, QObject *parent = 0);
+    explicit QOggSimplePlayer(const QString &filePath, QThread * audioThread=NULL);
     virtual ~QOggSimplePlayer();
+public slots:
     void start();
     void stop();
 private slots:
     void finishedPlaying(QAudio::State state);
     void readDone();
-    void readMore();
+    void close();
+    void open();
 private:
     QAudioOutput *output;
     QOggAudioBuffer buffer;
     FILE * file;
     OggVorbis_File vf;
     int current_section;
+    QString filePath;
+    bool needPlay;
+signals:
+    void internalOpen();
+    void internalClose();
 };
 
 #endif // QOGGSIMPLEPLAYER_H
